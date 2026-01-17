@@ -3,6 +3,9 @@ import { Grid, GridService } from "./Grid.js";
 import { type FluidType } from "./FluidTypes.js";
 
 export class FluidSolver {
+    // Vorticity confinement strength (higher = more turbulent)
+    private vorticityStrength = 0.3;
+    
     constructor(private grid: Grid) { }
 
     step(dt: number, fluid: FluidType) {
@@ -14,26 +17,29 @@ export class FluidSolver {
         // Add external forces (buoyancy)
         this.addBuoyancy(dt, buoyancy);
 
-        // Diffuse velocity
+        // Add vorticity confinement to maintain swirls
+        this.addVorticityConfinement(dt);
+
+        // Diffuse velocity with higher accuracy
         this.diffuse(1, this.grid.u_prev, this.grid.u, viscosity, dt);
         this.diffuse(2, this.grid.v_prev, this.grid.v, viscosity, dt);
 
         // Project (clean up divergence)
         this.project(this.grid.u_prev, this.grid.v_prev, this.grid.u, this.grid.v);
 
-        // Advect velocity
+        // Advect velocity with improved accuracy
         this.advect(1, this.grid.u, this.grid.u_prev, this.grid.u_prev, this.grid.v_prev, dt);
         this.advect(2, this.grid.v, this.grid.v_prev, this.grid.u_prev, this.grid.v_prev, dt);
 
-        // Project again
+        // Project again with higher accuracy
         this.project(this.grid.u, this.grid.v, this.grid.u_prev, this.grid.v_prev);
 
         // 2. Density step
 
-        // Diffuse density
+        // Diffuse density with higher accuracy
         this.diffuse(0, this.grid.dens_prev, this.grid.density, diffusion, dt);
 
-        // Advect density
+        // Advect density with improved accuracy
         this.advect(0, this.grid.density, this.grid.dens_prev, this.grid.u, this.grid.v, dt);
 
         // Decay density
@@ -56,6 +62,45 @@ export class FluidSolver {
     private decay(dt: number, rate: number) {
         for (let i = 0; i < this.grid.size; i++) {
             this.grid.density[i] *= (1 - rate);
+        }
+    }
+
+    private addVorticityConfinement(dt: number) {
+        const N = this.grid.width;
+        const M = this.grid.height;
+        
+        // Temporary arrays for vorticity
+        const curl = new Float32Array(this.grid.size);
+        
+        // 1. Calculate vorticity (curl of velocity field)
+        for (let j = 1; j <= M; j++) {
+            for (let i = 1; i <= N; i++) {
+                const idx = this.grid.IX(i, j);
+                const dvdx = (this.grid.v[this.grid.IX(i + 1, j)] - this.grid.v[this.grid.IX(i - 1, j)]) * 0.5;
+                const dudy = (this.grid.u[this.grid.IX(i, j + 1)] - this.grid.u[this.grid.IX(i, j - 1)]) * 0.5;
+                curl[idx] = dvdx - dudy;
+            }
+        }
+        
+        // 2. Calculate gradient of vorticity magnitude
+        for (let j = 1; j <= M; j++) {
+            for (let i = 1; i <= N; i++) {
+                const idx = this.grid.IX(i, j);
+                
+                // Gradient of absolute vorticity
+                const dCx = (Math.abs(curl[this.grid.IX(i + 1, j)]) - Math.abs(curl[this.grid.IX(i - 1, j)])) * 0.5;
+                const dCy = (Math.abs(curl[this.grid.IX(i, j + 1)]) - Math.abs(curl[this.grid.IX(i, j - 1)])) * 0.5;
+                
+                // Normalize gradient
+                const length = Math.sqrt(dCx * dCx + dCy * dCy) + 1e-5;
+                const Nx = dCx / length;
+                const Ny = dCy / length;
+                
+                // Add force perpendicular to gradient (N × ω)
+                const force = this.vorticityStrength * curl[idx];
+                this.grid.u[idx] += Ny * force * dt;
+                this.grid.v[idx] += -Nx * force * dt;
+            }
         }
     }
 
@@ -92,9 +137,9 @@ export class FluidSolver {
         const N = this.grid.width;
         const M = this.grid.height;
 
-        // Gauss-Seidel relaxation
-        // 20 iterations is a standard trade-off for real-time
-        for (let k = 0; k < 20; k++) {
+        // Gauss-Seidel relaxation with increased iterations for better accuracy
+        // Increased from 20 to 40 iterations for more stable and accurate solving
+        for (let k = 0; k < 40; k++) {
             for (let j = 1; j <= M; j++) {
                 for (let i = 1; i <= N; i++) {
                     x[this.grid.IX(i, j)] = (x0[this.grid.IX(i, j)] + a * (
@@ -112,13 +157,16 @@ export class FluidSolver {
     private project(velocX: Float32Array, velocY: Float32Array, p: Float32Array, div: Float32Array) {
         const N = this.grid.width;
         const M = this.grid.height;
+        
+        // Use proper scaling for non-square grids
+        const h = 1.0 / Math.max(N, M);
 
         for (let j = 1; j <= M; j++) {
             for (let i = 1; i <= N; i++) {
-                div[this.grid.IX(i, j)] = -0.5 * (
+                div[this.grid.IX(i, j)] = -0.5 * h * (
                     velocX[this.grid.IX(i + 1, j)] - velocX[this.grid.IX(i - 1, j)] +
                     velocY[this.grid.IX(i, j + 1)] - velocY[this.grid.IX(i, j - 1)]
-                ) / N; // assuming square cells? Or average N/M
+                );
                 p[this.grid.IX(i, j)] = 0;
             }
         }
@@ -129,8 +177,8 @@ export class FluidSolver {
 
         for (let j = 1; j <= M; j++) {
             for (let i = 1; i <= N; i++) {
-                velocX[this.grid.IX(i, j)] -= 0.5 * (p[this.grid.IX(i + 1, j)] - p[this.grid.IX(i - 1, j)]) * N;
-                velocY[this.grid.IX(i, j)] -= 0.5 * (p[this.grid.IX(i, j + 1)] - p[this.grid.IX(i, j - 1)]) * M;
+                velocX[this.grid.IX(i, j)] -= 0.5 * (p[this.grid.IX(i + 1, j)] - p[this.grid.IX(i - 1, j)]) / h;
+                velocY[this.grid.IX(i, j)] -= 0.5 * (p[this.grid.IX(i, j + 1)] - p[this.grid.IX(i, j - 1)]) / h;
             }
         }
 
@@ -142,14 +190,16 @@ export class FluidSolver {
         const N = this.grid.width;
         const M = this.grid.height;
 
-        const dt0 = dt * N; // Assuming dx=dy=1/N normalized? 
-        // Usually dt0 = dt * N
+        // Better scaling for stability
+        const dt0 = dt * Math.max(N, M);
 
         for (let j = 1; j <= M; j++) {
             for (let i = 1; i <= N; i++) {
+                // Backtrack particle position
                 let x = i - dt0 * velocX[this.grid.IX(i, j)];
                 let y = j - dt0 * velocY[this.grid.IX(i, j)];
 
+                // Clamp to grid boundaries
                 if (x < 0.5) x = 0.5;
                 if (x > N + 0.5) x = N + 0.5;
                 const i0 = Math.floor(x);
@@ -160,6 +210,7 @@ export class FluidSolver {
                 const j0 = Math.floor(y);
                 const j1 = j0 + 1;
 
+                // Bilinear interpolation
                 const s1 = x - i0;
                 const s0 = 1.0 - s1;
                 const t1 = y - j0;

@@ -12,27 +12,27 @@ export interface FluidType {
 
 export const Water: FluidType = {
     name: "Water",
-    viscosity: 0.0001,
-    diffusion: 0.0001,
-    decay: 0.001,
+    viscosity: 0.00005,  // Very low viscosity for smooth flow
+    diffusion: 0.00002,   // Minimal diffusion
+    decay: 0.0005,        // Slow decay
     color: "blue",
-    buoyancy: -0.1 // Flows down slightly or neutral
+    buoyancy: -0.05       // Slight downward tendency
 };
 
 export const Smoke: FluidType = {
     name: "Smoke",
-    viscosity: 0.01,
-    diffusion: 0.0001,
-    decay: 0.005,
+    viscosity: 0.00001,   // Very low viscosity (smoke is light)
+    diffusion: 0.0002,    // Higher diffusion (spreads out)
+    decay: 0.008,         // Moderate decay
     color: "gray",
-    buoyancy: 0.5
+    buoyancy: 1.2         // Strong upward motion
 };
 
 export const Fire: FluidType = {
     name: "Fire",
-    viscosity: 0.001,
-    diffusion: 0.0001,
-    decay: 0.03, // Burns out fast
+    viscosity: 0.00002,   // Low viscosity for dynamic movement
+    diffusion: 0.0001,    // Moderate diffusion
+    decay: 0.02,          // Burns out quickly
     color: "red",
-    buoyancy: 2.0
+    buoyancy: 3.0         // Very strong upward motion
 };

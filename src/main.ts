@@ -6,6 +6,7 @@ import { TerminalService, makeTerminalLayer } from "./rendering/Terminal.js";
 import { InputHandlerService, makeInputHandlerLayer, type UserEvent } from "./input/InputHandler.js";
 import { AsciiRenderer } from "./rendering/AsciiRenderer.js";
 import * as FluidTypes from "./domain/FluidTypes.js";
+import tk from "terminal-kit";
 
 // Simulation State
 interface SimState {
@@ -77,36 +78,28 @@ const Simulation = Effect.gen(function* (_) {
     );
 });
 
-// Construct the dependency graph
-const MainLayer = Layer.mergeAll(
-    makeGridLayer(60, 30), // fixed size for now, or detect later
-    makeFluidSolverLayer,
-    makeTerminalLayer,
-    makeInputHandlerLayer
-).pipe(
-    Layer.provide(makeGridLayer(80, 40)) // Overwrite grid size if needed or provide here
-);
-// Initial grid layer needs to be provided to FluidSolver and Simulation
-// Layer composition:
-// Grid -> FluidSolver
-// Grid -> Simulation
-// Terminal -> InputHandler
-// Terminal -> Simulation
-
-const GridLive = makeGridLayer(80, 40);
-const SolverLive = makeFluidSolverLayer.pipe(Layer.provide(GridLive));
-const TerminalLive = makeTerminalLayer;
-const InputLive = makeInputHandlerLayer.pipe(Layer.provide(TerminalLive));
-
-const AppLayer = Layer.mergeAll(
-    GridLive,
-    SolverLive,
-    TerminalLive,
-    InputLive
-);
-
-const program = Simulation.pipe(
-    Effect.provide(AppLayer)
-);
+// Create a dynamic grid initialization based on terminal dimensions
+const program = Effect.gen(function* (_) {
+    // Create terminal layer and get dimensions
+    const term = tk.terminal;
+    const width = term.width;
+    const height = term.height;
+    
+    // Create layers with actual terminal dimensions
+    const GridLive = makeGridLayer(width, height);
+    const SolverLive = makeFluidSolverLayer.pipe(Layer.provide(GridLive));
+    const TerminalLive = makeTerminalLayer;
+    const InputLive = makeInputHandlerLayer.pipe(Layer.provide(TerminalLive));
+    
+    const AppLayer = Layer.mergeAll(
+        GridLive,
+        SolverLive,
+        TerminalLive,
+        InputLive
+    );
+    
+    // Run simulation with dynamically sized grid
+    yield* _(Simulation.pipe(Effect.provide(AppLayer)));
+});
 
 NodeRuntime.runMain(program);
