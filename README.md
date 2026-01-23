@@ -1,5 +1,11 @@
 # Effect Package Template
 
+## Showcase:
+https://github.com/user-attachments/assets/df089c5a-99e8-4d52-bf29-9a33ce1fa380
+
+
+
+
 This template provides a solid foundation for building scalable and maintainable TypeScript package with Effect. 
 
 ## Running Code
